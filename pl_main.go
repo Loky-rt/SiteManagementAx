@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	adaptix "github.com/Adaptix-Framework/axc2"
+	adaptix "github.com/Adaptix-Framework/axc2/v2"
 )
 
 type Teamserver interface {
