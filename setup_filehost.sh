@@ -100,22 +100,21 @@ find_go() {
 detect_goexperiment() {
     local server_bin="$SERVER_DIR/adaptixserver"
     if [ ! -f "$server_bin" ]; then
-        warning_msg "adaptixserver binary not found - using default GOEXPERIMENT"
-        GOEXPERIMENT="jsonv2,greenteagc"
+        warning_msg "adaptixserver binary not found - building without GOEXPERIMENT"
+        GOEXPERIMENT=""
         return
     fi
 
     local version_line
-    version_line=$(strings "$server_bin" 2>/dev/null | grep -m1 '^go[0-9].*X:')
+    version_line=$($GO_BIN version "$server_bin" 2>/dev/null | head -1)
 
-    if [ -z "$version_line" ]; then
-        warning_msg "Could not detect GOEXPERIMENT from adaptixserver - using default"
-        GOEXPERIMENT="jsonv2,greenteagc"
-        return
+    if echo "$version_line" | grep -qP 'X:'; then
+        GOEXPERIMENT=$(echo "$version_line" | grep -oP '(?<=X:)\S+')
+        info_msg "Detected GOEXPERIMENT=$GOEXPERIMENT"
+    else
+        GOEXPERIMENT=""
+        info_msg "Server built without GOEXPERIMENT (plain $(echo "$version_line" | grep -oP 'go\d+\.\d+\.\d+'))"
     fi
-
-    GOEXPERIMENT="${version_line##*X:}"
-    info_msg "Detected GOEXPERIMENT=$GOEXPERIMENT"
 }
 
 ## ========= [ Go version detection from server binary ] =========
@@ -270,8 +269,12 @@ build_deploy() {
 
     step_msg "Building service_filehost plugin..."
     cd "$SCRIPT_DIR"
-    GOEXPERIMENT=$GOEXPERIMENT CGO_ENABLED=1 $GO_BIN build -buildmode=plugin \
-        -ldflags="-s -w" -o "$DEPLOY_DIR/service_filehost.so" . \
+    local go_env="CGO_ENABLED=1"
+    if [ -n "$GOEXPERIMENT" ]; then
+        go_env="GOEXPERIMENT=$GOEXPERIMENT $go_env"
+    fi
+    eval "$go_env $GO_BIN build -buildmode=plugin \
+        -ldflags=\"-s -w\" -o \"$DEPLOY_DIR/service_filehost.so\" ." \
         || error_exit "Failed to build FileHost plugin"
 
     cp config.yaml ax_config.axs "$DEPLOY_DIR/"

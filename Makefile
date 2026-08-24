@@ -1,8 +1,7 @@
 REPO_ROOT    := $(shell cd .. && pwd)
 SERVER_DIR   ?= $(REPO_ROOT)/Server
 DEPLOY_DIR   := $(SERVER_DIR)/extenders/file_host
-GO           ?= /usr/local/go/bin/go
-GOEXPERIMENT ?= jsonv2,greenteagc
+GO           ?= go
 
 OUT := $(DEPLOY_DIR)/service_filehost.so
 
@@ -13,7 +12,7 @@ all: $(OUT) deploy
 $(OUT): *.go
 	@mkdir -p $(DEPLOY_DIR)
 	@echo "  BUILD  service_filehost.so"
-	@GOEXPERIMENT=$(GOEXPERIMENT) CGO_ENABLED=1 $(GO) build -buildmode=plugin -ldflags="-s -w" -o $(OUT) .
+	@CGO_ENABLED=1 $(GO) build -buildmode=plugin -ldflags="-s -w" -o $(OUT) .
 	@echo "  DEPLOY $(OUT)"
 
 deploy:
