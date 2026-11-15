@@ -13,51 +13,29 @@ A file hosting and scripted web delivery service for AdaptixC2. Host files over 
 - HTTP Range request support (required by `bitsadmin`)
 - Real-time download counter broadcast to all operators
 - Auto-detection of MIME types from file extension
-- GUI integrated into Adaptix main menu (Site Management)
+- **Site Management** context menu on agent sessions (right-click)
+- **Persistent dock panel** in the Extender Docks area
 
 ## Directory Structure
 
 ```
-file_host/
-  config.yaml         Plugin metadata (service type, name, SSL paths)
-  pl_main.go          Plugin entrypoint - InitPlugin, Call dispatcher
-  handler.go          SiteManager, ServerPool, HTTP handler, API handlers
-  oneliner.go         Delivery method templates and PS encoding
-  ax_config.axs       AxScript GUI - Host File, Manage, Attacks dialogs
-  Makefile             Build + deploy targets
-  setup_filehost.sh   Standalone setup script for fresh AdaptixC2 installs
+SiteManagementAx/
+  config.yaml       Plugin metadata (service type, name, SSL paths)
+  pl_main.go        Plugin entrypoint — InitPlugin, Call dispatcher
+  handler.go        SiteManager, ServerPool, HTTP handler, API handlers
+  oneliner.go       Delivery method templates and PS encoding
+  ax_config.axs     AxScript GUI — Host File, Manage, Attacks dialogs + dock
+  axtool.spec       Build spec for axtool
 ```
 
-## Build & Deploy
+## Build & Install
 
-**Prerequisites:** Go 1.25.4, same version used to compile `adaptixserver`.
+**Prerequisites:** Go 1.21+, same version used to compile `adaptixserver`. `axtool` must be built or available at `dist/axtool` in the Adaptix repo root.
 
-### Using the Makefile (existing Adaptix setup)
+Run from the **Adaptix repo root**:
 
 ```bash
-# Build the plugin
-make all
-
-# Build and copy to ../Server/extenders/file_host/
-make deploy
-```
-
-### Using the setup script (fresh install)
-
-```bash
-./setup_filehost.sh --ax /path/to/AdaptixC2
-```
-
-This copies source into the Adaptix workspace, registers it in `go.work`, builds, and deploys.
-
-### Register in profile.yaml
-
-Add to the `extenders:` list in your server's `profile.yaml`:
-
-```yaml
-Teamserver:
-  extenders:
-    - "extenders/file_host/config.yaml"
+./dist/axtool adaptix.spec ext install https://github.com/Loky-rt/SiteManagementAx
 ```
 
 Restart the Adaptix server to load the plugin.
@@ -81,7 +59,12 @@ SSL cert/key paths are relative to the server working directory. Required only i
 
 ## Usage
 
-After loading, a **Site Management** menu appears in the Adaptix client main menu bar with three entries:
+After loading, **Site Management** appears in two places:
+
+- **Context menu** — right-click any agent session → Site Management
+- **Extender Dock** — persistent panel with the live sites table and action buttons
+
+Both show the same data and trigger the same dialogs.
 
 ### Host File
 
@@ -91,7 +74,7 @@ Upload a file to serve over HTTP/HTTPS.
 |-------|-------------|
 | File | Local file to host (Browse to select) |
 | URI Path | URL path the file will be served at (e.g. `/hosted/payload.bin`) |
-| Bind Host | Network interface to bind (0.0.0.0 = all interfaces) |
+| Bind Host | Network interface to bind (`0.0.0.0` = all interfaces) |
 | Port | TCP port for the file server |
 | Content-Type | MIME type (auto-detected from extension) |
 | Download Name | Optional `Content-Disposition` filename |
@@ -114,7 +97,7 @@ Generate one-liner commands to download and execute hosted files on target syste
 
 **Generate** creates the one-liner. **Copy to Clipboard** copies it.
 
-### Manage (Site Management)
+### Manage Sites
 
 Table view of all active hosted sites showing URI, host, port, SSL, content-type, file size, download count, one-shot status, creator, and full URL.
 
@@ -166,7 +149,7 @@ When the **Base64 Encode** checkbox is checked, PowerShell methods use `-enc` in
 powershell -nop -w hidden -enc <UTF-16LE-Base64>
 ```
 
-This is useful when running PowerShell commands from `cmd.exe`, where single-quoted `-c '...'` payloads are treated as string literals instead of being executed. The `-enc` flag works identically from both shells.
+Useful when running PowerShell commands from `cmd.exe`, where single-quoted `-c '...'` payloads are treated as string literals. The `-enc` flag works identically from both shells.
 
 Non-PowerShell methods (certutil, bitsadmin, curl, etc.) are unaffected by this setting.
 
@@ -174,18 +157,18 @@ Non-PowerShell methods (certutil, bitsadmin, curl, etc.) are unaffected by this 
 
 ### Server-Side (Go Plugin)
 
-- **`pl_main.go`** - `InitPlugin` receives the Teamserver interface, parses SSL config, initializes `SiteManager`, restores persisted sites. `Call` dispatches to handler functions.
-- **`handler.go`** - `SiteManager` stores hosted sites in memory with mutex-protected access. `ServerPool` manages per-host:port HTTP/HTTPS servers. `FileServer.ServeHTTP` serves files with `http.ServeContent` (handles Range, HEAD, Content-Length). Handlers for `host_file`, `remove_site`, `list_sites`, `generate_attack`.
-- **`oneliner.go`** - Template-based one-liner generation. `formatPS` handles PowerShell encoding modes. `encodePS` performs UTF-16LE base64 encoding.
+- **`pl_main.go`** — `InitPlugin` receives the Teamserver interface, parses SSL config, initializes `SiteManager`, restores persisted sites. `Call` dispatches to handler functions.
+- **`handler.go`** — `SiteManager` stores hosted sites in memory with mutex-protected access. `ServerPool` manages per-host:port HTTP/HTTPS servers. `FileServer.ServeHTTP` serves files with `http.ServeContent` (handles Range, HEAD, Content-Length). Handlers for `host_file`, `remove_site`, `list_sites`, `generate_attack`.
+- **`oneliner.go`** — Template-based one-liner generation. `formatPS` handles PowerShell encoding modes. `encodePS` performs UTF-16LE base64 encoding.
 
 ### Client-Side (AxScript)
 
-- **`ax_config.axs`** - Three dialogs: Host File (file upload form), Manage (site table with actions), Attacks (delivery method generator with custom script editor). Communicates with the server via `ax.service_command` / `data_handler`.
+- **`ax_config.axs`** — Context menu registered via `menu.add_session_main` for agent sessions. Persistent dock panel via `form.create_ext_dialog`. Three dialogs: Host File (file upload form), Manage (site table with actions), Attacks (delivery method generator with custom script editor). Communicates with the server via `ax.plugin_service_command` / `data_handler`.
 
 ### Data Flow
 
 ```
-Operator GUI  -->  ax.service_command("FileHost", "host_file", {...})
+Operator GUI  -->  ax.plugin_service_command("FileHost", "host_file", {...})
                           |
                    Adaptix Server
                           |
@@ -196,7 +179,7 @@ Operator GUI  -->  ax.service_command("FileHost", "host_file", {...})
                                     --> SiteManager.Persist()
                                     --> broadcast("site_added")
                           |
-                   data_handler() updates STATE, refreshes table
+                   data_handler() updates STATE, refreshes dock + table
 ```
 
 ### Persistence

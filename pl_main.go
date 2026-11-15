@@ -5,23 +5,13 @@ import (
 	"fmt"
 	"strings"
 
-	adaptix "github.com/Adaptix-Framework/axc2"
+	adaptix "github.com/Adaptix-Framework/axc2/v2"
 )
-
-type Teamserver interface {
-	TsServiceSendDataAll(service string, data string)
-	TsServiceSendDataClient(operator string, service string, data string)
-
-	TsExtenderDataSave(extenderName string, key string, value []byte) error
-	TsExtenderDataLoad(extenderName string, key string) ([]byte, error)
-	TsExtenderDataDelete(extenderName string, key string) error
-	TsExtenderDataKeys(extenderName string) ([]string, error)
-}
 
 type PluginService struct{}
 
 var (
-	Ts        Teamserver
+	Ts        adaptix.Teamserver
 	ModuleDir string
 	SSLCert   string
 	SSLKey    string
@@ -29,7 +19,7 @@ var (
 )
 
 func InitPlugin(ts any, moduleDir string, serviceConfig string) adaptix.PluginService {
-	Ts = ts.(Teamserver)
+	Ts = ts.(adaptix.Teamserver)
 	ModuleDir = moduleDir
 
 	for _, line := range strings.Split(serviceConfig, "\n") {
@@ -68,14 +58,18 @@ func (p *PluginService) Call(operator string, function string, args string) {
 	}
 }
 
+func (p *PluginService) CallRPC(operator string, function string, args string) (string, error) {
+	return "", fmt.Errorf("CallRPC not implemented")
+}
+
 func send(operator string, payload any) {
 	j, _ := json.Marshal(payload)
-	Ts.TsServiceSendDataClient(operator, "FileHost", string(j))
+	Ts.TsPluginServiceSendDataClient(operator, "FileHost", string(j))
 }
 
 func broadcast(payload any) {
 	j, _ := json.Marshal(payload)
-	Ts.TsServiceSendDataAll("FileHost", string(j))
+	Ts.TsPluginServiceSendDataAll("FileHost", string(j))
 }
 
 func sendError(operator string, msg string) {

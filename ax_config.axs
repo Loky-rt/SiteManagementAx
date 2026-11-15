@@ -89,7 +89,7 @@ var ATTACK_METHODS = {
     ],
     shellcode: [
         { key: "psh_shellcode",       display: "PowerShell VirtualAlloc" },
-        { key: "psh_fiber",            display: "PowerShell Fiber" },
+        { key: "psh_fiber",           display: "PowerShell Fiber" },
         { key: "psh_syscall_inject",  display: "PowerShell Nt Syscalls" },
         { key: "linux_memfd",         display: "Linux /dev/shm exec" },
         { key: "linux_memfd_python",  display: "Linux memfd_create (Python)" },
@@ -108,27 +108,98 @@ function detectMimeType(filename) {
     return MIME_MAP[ext] || "application/octet-stream";
 }
 
-// ── Entry ────────────────────────────────────────────────────────────────────
+// ── Agents list ───────────────────────────────────────────────────────────────
+var AGENTS = ["NaxDarks", "NoNameAx", "kharon", "beacon", "gopher", "pain", "specter"];
+
+// ── Client Entry (called by client on script load) ────────────────────────────
 
 function InitService() {
-    let hostAction = menu.create_action("Host File...", function() {
-        showHostFileDialog();
-    });
-    let manageAction = menu.create_action("Manage", function() {
-        showManageDialog();
-    });
-    let attackAction = menu.create_action("Attacks...", function() {
-        showAttacksDialog();
-    });
+    // ── Context menu (right-click on session) ──────────────────────────────
+    let hostAction   = menu.create_action("Host File...",  function() { showHostFileDialog(); });
+    let attackAction = menu.create_action("Attacks...",    function() { showAttacksDialog(); });
+    let manageAction = menu.create_action("Manage Sites",  function() { showManageDialog(); });
 
     let sitesMenu = menu.create_menu("Site Management");
     sitesMenu.addItem(hostAction);
     sitesMenu.addItem(attackAction);
     sitesMenu.addItem(menu.create_separator());
     sitesMenu.addItem(manageAction);
-    menu.add_main(sitesMenu);
 
-    ax.service_command("FileHost", "list_sites", {});
+    menu.add_session_main(sitesMenu, AGENTS);
+
+    // ── Persistent dock panel ──────────────────────────────────────────────
+    createDock();
+
+    ax.plugin_service_command("FileHost", "list_sites", {});
+}
+
+// ── Server Entry (called by server on extender load) ─────────────────────────
+
+function RegisterServiceCommands() {
+    // No CLI commands needed — UI is driven from InitService() above
+}
+
+// ── Persistent Dock ───────────────────────────────────────────────────────────
+
+function createDock() {
+    W.dockTable = form.create_table(["URI", "Host:Port", "SSL", "Type", "Size", "DLs", "One-Shot", "URL"]);
+    W.dockTable.setSortingEnabled(true);
+
+    let hostBtn    = form.create_button("Host File...");
+    let attackBtn  = form.create_button("Attacks...");
+    let removeBtn  = form.create_button("Remove");
+    let copyBtn    = form.create_button("Copy URL");
+    let refreshBtn = form.create_button("Refresh");
+
+    form.connect(hostBtn, "clicked", function() {
+        showHostFileDialog();
+    });
+
+    form.connect(attackBtn, "clicked", function() {
+        showAttacksDialog();
+    });
+
+    form.connect(removeBtn, "clicked", function() {
+        let rows = W.dockTable.selectedRows();
+        if (rows.length === 0) return;
+        for (let i = 0; i < rows.length; i++) {
+            let uri      = W.dockTable.text(rows[i], 0);
+            let hostport = W.dockTable.text(rows[i], 1);
+            let siteKey  = hostport + uri;
+            ax.plugin_service_command("FileHost", "remove_site", { site_key: siteKey });
+        }
+    });
+
+    form.connect(copyBtn, "clicked", function() {
+        let rows = W.dockTable.selectedRows();
+        if (rows.length === 0) return;
+        let url = W.dockTable.text(rows[0], 7);
+        ax.copy_to_clipboard(url);
+    });
+
+    form.connect(refreshBtn, "clicked", function() {
+        ax.plugin_service_command("FileHost", "list_sites", {});
+    });
+
+    let btnLayout = form.create_hlayout();
+    btnLayout.addWidget(hostBtn);
+    btnLayout.addWidget(attackBtn);
+    btnLayout.addWidget(removeBtn);
+    btnLayout.addWidget(copyBtn);
+    btnLayout.addWidget(form.create_hspacer());
+    btnLayout.addWidget(refreshBtn);
+
+    let btnPanel = form.create_panel();
+    btnPanel.setLayout(btnLayout);
+
+    let mainLayout = form.create_vlayout();
+    mainLayout.addWidget(W.dockTable);
+    mainLayout.addWidget(btnPanel);
+
+    W.dockDialog = form.create_ext_dialog("FileHost - Site Management");
+    W.dockDialog.setSize(900, 300);
+    W.dockDialog.setLayout(mainLayout);
+    W.dockDialog.setButtonsText("", "");
 }
 
 // ── Data Handler ─────────────────────────────────────────────────────────────
@@ -142,6 +213,7 @@ function data_handler(data) {
         case "sites_list":
             STATE.sites = r.sites || [];
             STATE.interfaces = r.interfaces || ["0.0.0.0"];
+            refreshDockTable();
             refreshSiteTable();
             break;
 
@@ -161,6 +233,7 @@ function data_handler(data) {
                 downloads:    0,
                 url:          r.url,
             });
+            refreshDockTable();
             refreshSiteTable();
             ax.show_message("File Hosted", "URL: " + r.url + "\nSize: " + ax.format_size(r.file_size) + "\nContent-Type: " + r.content_type + (r.one_shot ? "\nOne-shot: Yes" : ""));
             break;
@@ -172,6 +245,7 @@ function data_handler(data) {
                     break;
                 }
             }
+            refreshDockTable();
             refreshSiteTable();
             break;
 
@@ -182,6 +256,7 @@ function data_handler(data) {
                     break;
                 }
             }
+            refreshDockTable();
             refreshSiteTable();
             break;
 
@@ -281,7 +356,7 @@ function showHostFileDialog() {
         return;
     }
 
-    let fileB64 = ax.file_read(selectedPath);
+    let fileB64 = ax.encode_file("base64", selectedPath);
     if (!fileB64 || fileB64.length === 0) {
         ax.show_message("FileHost", "Failed to read file.");
         return;
@@ -293,7 +368,7 @@ function showHostFileDialog() {
         return;
     }
 
-    ax.service_command("FileHost", "host_file", {
+    ax.plugin_service_command("FileHost", "host_file", {
         uri:          uri,
         host:         comboHost.currentText(),
         port:         spinPort.value(),
@@ -305,7 +380,7 @@ function showHostFileDialog() {
     });
 }
 
-// ── Site Management Dialog ──────────────────────────────────────────────────
+// ── Site Management Dialog ───────────────────────────────────────────────────
 
 function showManageDialog() {
     W.siteTable = form.create_table(["URI", "Host", "Port", "SSL", "Content-Type", "Size", "Downloads", "One-Shot", "Created By", "URL"]);
@@ -324,7 +399,7 @@ function showManageDialog() {
             let host = W.siteTable.text(rows[i], 1);
             let port = W.siteTable.text(rows[i], 2);
             let siteKey = host + ":" + port + uri;
-            ax.service_command("FileHost", "remove_site", { site_key: siteKey });
+            ax.plugin_service_command("FileHost", "remove_site", { site_key: siteKey });
         }
     });
 
@@ -336,7 +411,7 @@ function showManageDialog() {
     });
 
     form.connect(refreshBtn, "clicked", function() {
-        ax.service_command("FileHost", "list_sites", {});
+        ax.plugin_service_command("FileHost", "list_sites", {});
     });
 
     let btnLayout = form.create_hlayout();
@@ -447,7 +522,7 @@ function showAttacksDialog() {
             let methods = ATTACK_METHODS[catKey];
             let methodIdx = comboMethod.currentIndex();
             if (methodIdx < 0 || methodIdx >= methods.length) return;
-            ax.service_command("FileHost", "generate_attack", {
+            ax.plugin_service_command("FileHost", "generate_attack", {
                 url:     url,
                 method:  methods[methodIdx].key,
                 encoded: checkEnc.isChecked(),
@@ -485,8 +560,29 @@ function showAttacksDialog() {
     W.attackResult = null;
 }
 
-// ── Refresh Helpers ─────────────────────────────────────────────────────────
+// ── Refresh Helpers ──────────────────────────────────────────────────────────
 
+// Dock table (persistent panel) — columnas compactas
+function refreshDockTable() {
+    if (!W.dockTable) return;
+    W.dockTable.clear();
+
+    for (let i = 0; i < STATE.sites.length; i++) {
+        let s = STATE.sites[i];
+        W.dockTable.addItem([
+            s.uri,
+            (s.host || "") + ":" + String(s.port || 0),
+            s.ssl ? "Yes" : "No",
+            s.content_type,
+            ax.format_size(s.file_size),
+            String(s.downloads),
+            s.one_shot ? "Yes" : "No",
+            s.url || "",
+        ]);
+    }
+}
+
+// Modal table (Manage Sites dialog)
 function refreshSiteTable() {
     if (!W.siteTable) return;
     W.siteTable.clear();
